@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Catur</title>
+  <style>
+    body { 
+  font-family: Arial, sans-serif; 
+  text-align: center; 
+  background: linear-gradient(135deg, red, black); 
+  min-height: 100vh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+    h1 { margin: 10px; }
+    #modeSelect { margin: 20px; padding: 10px; font-size: 16px; }
+    #chessboard {
+      display: grid;
+      grid-template-columns: repeat(8, 60px);
+      grid-template-rows: repeat(8, 60px);
+      margin: 20px auto;
+      border: 2px solid black;
+    }
+    .cell {
+      width: 60px; height: 60px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 30px; cursor: pointer;
+    }
+    .white { background-color: #f0d9b5; }
+    .black { background-color: #b58863; }
+    .highlight { outline: 3px solid yellow; }
+    .check { background-color: #ff4c4c !important; }
+    #status { margin-top: 20px; font-size: 18px; font-weight: bold; }
+    .red { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Catur</h1>
+  <select id="modeSelect">
+    <option value="pvp">Player 1 vs Player 2</option>
+    <option value="pvc">Player vs Computer</option>
+    <option value="cvc">Computer vs Computer</option>
+  </select>
+  <div id="chessboard"></div>
+  <p id="status">Pilih mode permainan.</p>
+
+  <script>
+    const board = document.getElementById("chessboard");
+    const statusText = document.getElementById("status");
+    const modeSelect = document.getElementById("modeSelect");
+
+    const pieces = {
+      r: "♜", n: "♞", b: "♝", q: "♛", k: "♚", p: "♟",
+      R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔", P: "♙"
+    };
+
+    let chessBoard;
+    let selected = null;
+    let possibleMoves = [];
+    let currentPlayer = "white";
+    let mode = "pvp";
+    let hasMoved = {}; // untuk cek rokade
+
+    function initBoard() {
+      return [
+        ["r","n","b","q","k","b","n","r"],
+        ["p","p","p","p","p","p","p","p"],
+        ["","","","","","","",""],
+        ["","","","","","","",""],
+        ["","","","","","","",""],
+        ["","","","","","","",""],
+        ["P","P","P","P","P","P","P","P"],
+        ["R","N","B","Q","K","B","N","R"]
+      ];
+    }
+
+    function drawBoard() {
+      board.innerHTML = "";
+      let kingInCheck = getKingInCheck();
+
+      for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+          const cell = document.createElement("div");
+          cell.classList.add("cell");
+          cell.classList.add((row + col) % 2 === 0 ? "white" : "black");
+          cell.dataset.row = row;
+          cell.dataset.col = col;
+          const piece = chessBoard[row][col];
+          if (piece) cell.textContent = pieces[piece];
+
+          if (selected && possibleMoves.some(m => m.row === row && m.col === col)) {
+            cell.classList.add("highlight");
+          }
+          if (kingInCheck && kingInCheck.row === row && kingInCheck.col === col) {
+            cell.classList.add("check");
+          }
+
+          cell.addEventListener("click", () => handleClick(row, col));
+          board.appendChild(cell);
+        }
+      }
+
+      if (isCheckmate()) {
+        statusText.textContent = "Skak Mat! " + (currentPlayer === "white" ? "Putih" : "Hitam") + " Kalah";
+        statusText.classList.add("red");
+      } else {
+        statusText.textContent = "Giliran: " + (currentPlayer === "white" ? "Putih" : "Hitam");
+        statusText.classList.remove("red");
+      }
+    }
+
+    function handleClick(row, col) {
+      if (mode === "cvc" || isCheckmate()) return;
+      const piece = chessBoard[row][col];
+      if (selected) {
+        if (possibleMoves.some(m => m.row === row && m.col === col)) {
+          movePiece(selected.row, selected.col, row, col);
+          selected = null;
+          possibleMoves = [];
+        } else {
+          selected = null;
+          possibleMoves = [];
+        }
+      } else if (piece && isCurrentPlayerPiece(piece)) {
+        selected = { row, col };
+        possibleMoves = getValidMoves(row, col);
+      }
+      drawBoard();
+    }
+
+    function isCurrentPlayerPiece(piece) {
+      return currentPlayer === "white" ? piece === piece.toUpperCase() : piece === piece.toLowerCase();
+    }
+
+    function movePiece(fromRow, fromCol, toRow, toCol) {
+      const piece = chessBoard[fromRow][fromCol];
+      chessBoard[toRow][toCol] = piece;
+      chessBoard[fromRow][fromCol] = "";
+      hasMoved[piece+fromRow+fromCol] = true;
+
+      // Rokade
+      if (piece.toLowerCase() === "k" && Math.abs(toCol - fromCol) === 2) {
+        if (toCol === 6) { // rokade kanan
+          chessBoard[toRow][5] = chessBoard[toRow][7];
+          chessBoard[toRow][7] = "";
+        } else if (toCol === 2) { // rokade kiri
+          chessBoard[toRow][3] = chessBoard[toRow][0];
+          chessBoard[toRow][0] = "";
+        }
+      }
+
+      // Promosi pion
+      if (piece === "P" && toRow === 0) chessBoard[toRow][toCol] = "Q";
+      if (piece === "p" && toRow === 7) chessBoard[toRow][toCol] = "q";
+
+      currentPlayer = currentPlayer === "white" ? "black" : "white";
+      drawBoard();
+
+      if (mode === "pvc" && currentPlayer === "black" && !isCheckmate()) {
+        setTimeout(computerMove, 500);
+      }
+      if (mode === "cvc" && !isCheckmate()) {
+        setTimeout(computerMove, 500);
+      }
+    }
+
+    function getValidMoves(row, col) {
+      const piece = chessBoard[row][col];
+      if (!piece) return [];
+      const isWhite = piece === piece.toUpperCase();
+      const moves = [];
+      const dir = isWhite ? -1 : 1;
+
+      const addMove = (r, c) => {
+        if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+          const target = chessBoard[r][c];
+          if (!target || isWhite !== (target === target.toUpperCase())) {
+            moves.push({ row: r, col: c });
+          }
+        }
+      };
+
+      switch (piece.toLowerCase()) {
+        case "p":
+          if (!chessBoard[row + dir][col]) addMove(row + dir, col);
+          if ((isWhite && row === 6) || (!isWhite && row === 1)) {
+            if (!chessBoard[row + dir][col] && !chessBoard[row + 2*dir][col]) {
+              addMove(row + 2*dir, col);
+            }
+          }
+          if (chessBoard[row + dir]?.[col - 1] && isWhite !== (chessBoard[row + dir][col - 1] === chessBoard[row + dir][col - 1].toUpperCase())) {
+            addMove(row + dir, col - 1);
+          }
+          if (chessBoard[row + dir]?.[col + 1] && isWhite !== (chessBoard[row + dir][col + 1] === chessBoard[row + dir][col + 1].toUpperCase())) {
+            addMove(row + dir, col + 1);
+          }
+          break;
+        case "r": rookMoves(row, col, moves, isWhite); break;
+        case "b": bishopMoves(row, col, moves, isWhite); break;
+        case "q": rookMoves(row, col, moves, isWhite); bishopMoves(row, col, moves, isWhite); break;
+        case "n":
+          [[-2,-1],[-2,1],[2,-1],[2,1],[-1,-2],[-1,2],[1,-2],[1,2]].forEach(([dr,dc]) => addMove(row+dr, col+dc));
+          break;
+        case "k":
+          for (let dr=-1; dr<=1; dr++) {
+            for (let dc=-1; dc<=1; dc++) {
+              if (dr || dc) addMove(row+dr, col+dc);
+            }
+          }
+          // Rokade
+          if (!hasMoved[piece+row+col]) {
+            if (!chessBoard[row][5] && !chessBoard[row][6] && chessBoard[row][7].toLowerCase()==="r" && !hasMoved[chessBoard[row][7]+row+7]) {
+              moves.push({row, col:6});
+            }
+            if (!chessBoard[row][1] && !chessBoard[row][2] && !chessBoard[row][3] && chessBoard[row][0].toLowerCase()==="r" && !hasMoved[chessBoard[row][0]+row+0]) {
+              moves.push({row, col:2});
+            }
+          }
+          break;
+      }
+
+      // Simulasi: hanya ambil langkah yang tidak membuat raja sendiri skak
+      return moves.filter(m => !causesCheck(row,col,m.row,m.col,isWhite));
+    }
+
+    function rookMoves(row, col, moves, isWhite) {
+      [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{
+        let r=row+dr,c=col+dc;
+        while(r>=0&&r<8&&c>=0&&c<8){
+          const target=chessBoard[r][c];
+          if(!target){ moves.push({row:r,col:c}); }
+          else{ if(isWhite!== (target===target.toUpperCase())) moves.push({row:r,col:c}); break; }
+          r+=dr; c+=dc;
+        }
+      });
+    }
+
+    function bishopMoves(row, col, moves, isWhite) {
+      [[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([dr,dc])=>{
+        let r=row+dr,c=col+dc;
+        while(r>=0&&r<8&&c>=0&&c<8){
+          const target=chessBoard[r][c];
+          if(!target){ moves.push({row:r,col:c}); }
+          else{ if(isWhite!== (target===target.toUpperCase())) moves.push({row:r,col:c}); break; }
+          r+=dr; c+=dc;
+        }
+      });
+    }
+
+    function causesCheck(fromRow,fromCol,toRow,toCol,isWhite){
+      const backup=JSON.parse(JSON.stringify(chessBoard));
+      const piece=chessBoard[fromRow][fromCol];
+      chessBoard[toRow][toCol]=piece;
+      chessBoard[fromRow][fromCol]="";
+      const kingPos=findKing(isWhite?"K":"k");
+      const inCheck= isSquareAttacked(kingPos.row, kingPos.col, !isWhite);
+      chessBoard=backup;
+      return inCheck;
+    }
+
+    function findKing(symbol){
+      for(let r=0;r<8;r++){
+        for(let c=0;c<8;c++){
+          if(chessBoard[r][c]===symbol) return {row:r,col:c};
+        }
+      }
+      return null;
+    }
+
+    function isSquareAttacked(row,col,byWhite){
+      for(let r=0;r<8;r++){
+        for(let c=0;c<8;c++){
+          const piece=chessBoard[r][c];
+          if(piece && (byWhite?(piece===piece.toUpperCase()):(piece===piece.toLowerCase()))){
+            const moves=getPseudoMoves(r,c);
+            if(moves.some(m=>m.row===row&&m.col===col)) return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function getPseudoMoves(row,col){
+      const piece=chessBoard[row][col];
+      if(!piece) return [];
+      const isWhite=piece===piece.toUpperCase();
+      const moves=[];
+      const dir=isWhite?-1:1;
+      const add=(r,c)=>{if(r>=0&&r<8&&c>=0&&c<8)moves.push({row:r,col:c});};
+      switch(piece.toLowerCase()){
+        case"p": add(row+dir,col-1); add(row+dir,col+1); break;
+        case"r": rookMoves(row,col,moves,isWhite); break;
+        case"b": bishopMoves(row,col,moves,isWhite); break;
+        case"q": rookMoves(row,col,moves,isWhite); bishopMoves(row,col,moves,isWhite); break;
+        case"n":[[-2,-1],[-2,1],[2,-1],[2,1],[-1,-2],[-1,2],[1,-2],[1,2]].forEach(([dr,dc])=>add(row+dr,col+dc)); break;
+        case"k": for(let dr=-1;dr<=1;dr++){for(let dc=-1;dc<=1;dc++){if(dr||dc)add(row+dr,col+dc);}} break;
+      }
+      return moves;
+    }
+
+    function getKingInCheck(){
+      const king=findKing(currentPlayer==="white"?"K":"k");
+      if(!king) return null;
+      const inCheck=isSquareAttacked(king.row,king.col,currentPlayer!=="white");
+      return inCheck?king:null;
+    }
+
+    function isCheckmate(){
+      if(!getKingInCheck()) return false;
+      for(let r=0;r<8;r++){
+        for(let c=0;c<8;c++){
+          const piece=chessBoard[r][c];
+          if(piece && isCurrentPlayerPiece(piece)){
+            const valid=getValidMoves(r,c);
+            if(valid.length>0) return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    function computerMove() {
+      if(isCheckmate()) return;
+      let moves = [];
+      for (let row=0; row<8; row++) {
+        for (let col=0; col<8; col++) {
+          const piece = chessBoard[row][col];
+          if (piece && isCurrentPlayerPiece(piece)) {
+            const valid = getValidMoves(row,col);
+            valid.forEach(m => moves.push({fromRow:row, fromCol:col, toRow:m.row, toCol:m.col}));
+          }
+        }
+      }
+      if (moves.length > 0) {
+        const move = moves[Math.floor(Math.random() * moves.length)];
+        movePiece(move.fromRow, move.fromCol, move.toRow, move.toCol);
+      }
+      if (mode === "cvc" && !isCheckmate()) setTimeout(computerMove, 500);
+    }
+
+    modeSelect.addEventListener("change", () => {
+      mode = modeSelect.value;
+      resetGame();
+    });
+
+    function resetGame() {
+      chessBoard = initBoard();
+      currentPlayer = "white";
+      selected = null;
+      possibleMoves = [];
+      hasMoved = {};
+      drawBoard();
+      if (mode === "cvc") setTimeout(computerMove, 500);
+    }
+
+    resetGame();
+  </script>
+</body>
+</html>
